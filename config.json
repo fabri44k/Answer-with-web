@@ -1,0 +1,28 @@
+{
+    "llm_provider": "ollama",
+    "final_answer_model": "mistral-nemo",
+    "retrieval_mode": "sentence_transformers",
+    "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
+    "search_engine": "ddg_custom",
+    "max_pages": 1,
+    "max_chunk": 5,
+    "save_content_to_file": false,
+    "llm_template": "You must answer in {language}.\n\nYou are provided with a raw, unstructured document containing information that may be relevant to the question.\n\nYour task:\n\n1. Carefully read and analyze the document.\n2. Provide a direct, concise answer to the question, using **only** the information from the document whenever possible.\n3. Avoid phrases like \"the document says,\" \"according to the document,\" or \"based on the document.\" Write the answer as a standalone statement.\n4. If the document does not contain enough information to fully answer, you may use your general knowledge.\n5. Do not repeat or list large portions of the document; summarize only what is necessary to answer.\n6. Ensure your answer is clear and informative.\n7. If the question is a keyword, without a specific question, provide a general overview based on the document.\n8. If you have multiple relevant paragraphs, combine them into a single coherent answer.\n9. If the document is in a language different from the one specified, you must use {language} to provide the final answer.\n10. **Accuracy**: Preserve 100% of the original meaning, including nuances and subtleties.\n11. Use minimum of 1 sentence and maximum of 3 sentences in your answer.\n 12. If the language is global or unknown use the same language of the document.\n\nQUESTION:\n{question}\n\nDOCUMENT:\n{document}\n\nReturn only the answer, without any extra commentary.",
+    "all_llm_configs": [
+        {
+            "name": "gemma3",
+            "temperature": 0.3,
+            "thinking_enabled": false
+        },
+        {
+            "name": "mistral-nemo",
+            "temperature": 0.3,
+            "thinking_enabled": false
+        },
+        {
+            "name": "goekdenizguelmez/JOSIEFIED-Qwen3:4b",
+            "temperature": 0.3,
+            "thinking_enabled": true
+        }
+    ]
+}

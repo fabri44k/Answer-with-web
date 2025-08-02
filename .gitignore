@@ -1,0 +1,12 @@
+data.txt
+testo.txt
+altro/*
+
+retrieve/test.py
+web/test.py
+
+*.pyc
+__pycache__/
+
+data.txt
+data_answers.csv
