@@ -7,3 +7,4 @@ crawl4ai>=0.2.0
 strip-markdown>=0.1.4
 googlesearch-python>=1.2.3
 duckduckgo-search>=4.0.0
+fake-http-header

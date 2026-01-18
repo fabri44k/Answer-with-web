@@ -62,6 +62,7 @@ pip install -r requirements.txt
 - Setup web scraper
 
 ```bash
+playwright install
 crawl4ai-setup
 crawl4ai-doctor
 ```
