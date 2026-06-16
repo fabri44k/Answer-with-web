@@ -42,29 +42,26 @@ This file is ready to be imported into Anki.
 
 ## Install
 
-- Requires Python 3.10 or higher and pip.
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
+
+- Requires [uv](https://docs.astral.sh/uv/getting-started/installation/) installed. The correct Python version (3.13) is downloaded automatically by uv, so you don't need to install Python yourself.
 
 - Requires Ollama installed and running on your machine.
 
-- Download torch with CUDA SUPPORT from https://pytorch.org/get-started/locally/, select your os specs and copy the command. If you don't have a GPU the execution will still work but of course it will be slower.
-Example of installation on Windows:
+- Install all dependencies (including torch with CUDA 12.6 support):
 
 ```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+uv sync
 ```
 
-- Install the requirements:
-
-```bash
-pip install -r requirements.txt
-```
+The CUDA build of torch is configured in `pyproject.toml` and pinned in `uv.lock`, so `uv sync` installs the right wheel automatically on both Linux and Windows. If you don't have a GPU the execution will still work but of course it will be slower.
 
 - Setup web scraper
 
 ```bash
-playwright install
-crawl4ai-setup
-crawl4ai-doctor
+uv run playwright install
+uv run crawl4ai-setup
+uv run crawl4ai-doctor
 ```
 Ensure that at the end appears: `[COMPLETE] ● ✅ Crawling test passed!`
 
@@ -159,7 +156,7 @@ The tool provides a status for each response, indicating whether the answer was 
 ### Single Query mode
 
 ```bash
-python answer_using_web.py -l <language> -q "<query>"
+uv run python3 answer_using_web.py -l <language> -q "<query>"
 ```
 
 - `-l` specifies the language used in the search engine and in the output response. It should match a language supported by the search engine.
@@ -167,7 +164,7 @@ python answer_using_web.py -l <language> -q "<query>"
 Get the supported languages for the search engine you are using:
 
 ```bash
-python .\answer_using_web.py --list-language
+uv run python3 .\answer_using_web.py --list-language
 ```
 
 - `-q` is the question you want to ask. It should be in the language specified by `-l`.
@@ -178,7 +175,7 @@ python .\answer_using_web.py --list-language
 Activate the batch mode:
 
 ```bash
-python answer_using_web.py -b
+uv run python3 answer_using_web.py -b
 ```
 It will ask:
 

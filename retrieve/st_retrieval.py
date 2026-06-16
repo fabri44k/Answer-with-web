@@ -18,7 +18,9 @@ class SentenceTransformerRetriever:
 
     def __init__(self, model_name: str) -> None:
         device: str = "cuda" if torch.cuda.is_available() else "cpu"
-        self.__embedder: SentenceTransformer = SentenceTransformer(model_name, device)
+        self.__embedder: SentenceTransformer = SentenceTransformer(
+            model_name, device=device
+        )
 
     def __split_into_chunk(self, document: str) -> list[str]:
         chunks = self.__text_splitter.split_text(document)

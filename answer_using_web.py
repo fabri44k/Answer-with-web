@@ -207,7 +207,7 @@ def handle_batch_mode():
     # list of query with warnings
     warning_list = []
 
-    with open(output_file, "w", encoding="utf-8") as f:
+    with open(output_file, "a", encoding="utf-8") as f:
         for q in questions:
             query = f"{template} {q}" if expand else q
             print(f"[INFO] Processing: {query}")

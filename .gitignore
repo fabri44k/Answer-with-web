@@ -10,3 +10,5 @@ __pycache__/
 
 data.txt
 data_answers.csv
+
+.venv/

@@ -25,6 +25,8 @@ class DuckDuckGoScraper:
 
         response = requests.post(self.__DDG_URL, headers=headers, data=params)
 
+        #print(f"Response status code: {response.status_code}")
+
         if response.status_code == 200:
             return response.text
         else:
@@ -79,3 +81,12 @@ class DuckDuckGoScraper:
 
         # return only the first max_results urls
         return [result["url"] for result in results[:max_results]]
+
+
+if __name__ == "__main__":
+    scraper = DuckDuckGoScraper()
+    query = "Python programming"
+    max_results = 5
+    region = "wt-wt"  # Worldwide
+    links = scraper.get_web_links_ddg(query, max_results, region)
+    print(links)

@@ -18,6 +18,11 @@
       "name": "mistral-nemo",
       "temperature": 0.3,
       "thinking_enabled": false
+    },
+    {
+      "name": "gemma4:e4b",
+      "temperature": 0.3,
+      "thinking_enabled": true
     }
   ]
 }
