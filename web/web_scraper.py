@@ -3,7 +3,7 @@ import re
 
 from bs4 import BeautifulSoup
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from googlesearch import search  # https://pypi.org/project/googlesearch-python/
 from strip_markdown import strip_markdown
 
@@ -12,7 +12,7 @@ from .duck import DuckDuckGoScraper
 
 class WebScraper:
     # [language] -> ddg_region
-    # https://pypi.org/project/duckduckgo-search/#regions
+    # https://pypi.org/project/ddgs/#regions
     __ddg_regions_mappings: dict[str, str] = {
         "global": "wt-wt",
         "italian": "it-it",

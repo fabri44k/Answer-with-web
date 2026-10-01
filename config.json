@@ -1,6 +1,6 @@
 {
   "llm_provider": "ollama",
-  "final_answer_model": "gemma3:4b",
+  "final_answer_model": "mistral-nemo",
   "retrieval_mode": "sentence_transformers",
   "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
   "search_engine": "ddg_custom",

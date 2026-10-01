@@ -1,29 +1,28 @@
 from typing import Union
 
-import requests
+import primp
 from bs4 import BeautifulSoup
-from fake_http_header import FakeHttpHeader
-
-"""
-Use simple request and user agent rotation to scrape DuckDuckGo search results
-"""
-
 
 class DuckDuckGoScraper:
     __DDG_URL = "https://html.duckduckgo.com/html"
     __MAX_RESULT_FOR_PAGE_DDG = 10
 
-    def __get_ddg_html_content(self, query: str, region: str = "wt-wt") -> str:
-        # use fake http headers
-        fake_header: FakeHttpHeader = FakeHttpHeader()
-        headers: dict = fake_header.as_header_dict()
+    def __get_ddg_html_content_with_primp(self, query: str, region: str = "wt-wt") -> str:
+        """
+        Get the HTML content of a DuckDuckGo search results page for a given query and region.
+        
+        Scraping stack:
+        - primp 
+        """
 
         params: dict = {
             "q": query,
             "kl": region,
         }
 
-        response = requests.post(self.__DDG_URL, headers=headers, data=params)
+        client = primp.Client()
+
+        response = client.post(self.__DDG_URL, data=params)
 
         #print(f"Response status code: {response.status_code}")
 
@@ -74,7 +73,7 @@ class DuckDuckGoScraper:
                 }"
             )
 
-        html_content: str = self.__get_ddg_html_content(query, region)
+        html_content: str = self.__get_ddg_html_content_with_primp(query, region)
         results: list[dict[str, str]] = self.__parse_ddg_result_page(
             html_content, max_results
         )
