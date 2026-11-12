@@ -1,20 +1,32 @@
 # Answer with Web
 
-Answer with web offers a way of getting higher-quality AI answers by supplying the LLM with relevant content scraped from the web.
-It works similarly to the *Chat GPT web search* feature, but runs locally — no rate limits, no subscriptions required.
+Answer with Web gives you a short LLM answer for one query, or for a long list of them. You can also feed the LLM relevant content scraped from the web.
+Its main use today is building **Anki decks** in batch: you give it a list of questions and get a ready-to-import CSV of `question;answer` pairs.
 
 Here is what it does:
 
-- Scrapes web pages based on a user query using a search engine (Google or DuckDuckGo).
-- Extracts relevant content from the scraped pages.
-- Uses a large language model (LLM) to generate a final answer based on the extracted content.
+- (OPTIONAL) WEB_FETCH: Scrapes web pages based on a user query using a search engine (Google or DuckDuckGo).
+- (IF WEB_FETCH) RETRIEVAL: Extracts relevant content from the scraped pages.
+- ANSWER: Uses a large language model (LLM) to generate a final answer for your query, based on the extracted content when present.
 
-You can run it even in batch mode with a list of queries and the output will be a CSV file with the answers generated. This may be a good choice for creating **Anki decks**.
+Example use case: you have a list of 100 words (e.g. `Meaning of perorare`, `Meaning of ...`) and want a concise definition for each one, all in the same format, as flashcards.
 
-Example use case: Suppose you have a list of terms and want to learn their definitions.
-You can use this tool to retrieve accurate definitions for each term.
+### When does it make sense?
 
-The main advantage is that the response will be more reliable than a standard LLM interaction, because the model is forced to use information extracted from the web. This greatly reduces the risk of hallucinations, more common on open source and small models.
+Today agentic tools (Claude Code, ChatGPT, local models with tool calling) can search the web on their own, so this project is no longer the only way to get grounded answers. It still makes sense when:
+
+- **You have a large batch of similar queries.** A fixed pipeline beats an agent here: the cost is predictable, every answer follows the same template (1-3 sentences, ideal for flashcards), results are reproducible, and you don't need to babysit 100 agent runs.
+- **You don't want to pay anything.** Everything runs locally with Ollama. No subscription, no API keys, no rate limits.
+- **You use small local models.** They hallucinate more often, and grounding them on retrieved web content makes their answers noticeably more reliable.
+- **You want to save tokens.** The model gets only a few relevant chunks instead of searching, opening and reading whole pages by itself.
+- **You want to learn.** It is a small, readable, end-to-end RAG pipeline: search, scraping, chunking, embeddings, ranking, generation.
+
+### Limitations
+
+- **The setup is heavy.** Torch with CUDA, Playwright, crawl4ai, an embedding model and Ollama are all required, so it is not really suited for very limited hardware.
+- **Scraping is fragile.** Search engines change and add bot protection, which can break the fetch step.
+- **Quality depends on the top results.** With a low `max_pages` the answer depends on the first pages returned by the search engine.
+- **Web content isn't always needed.** For common knowledge (e.g. definitions of everyday words) a capable model already knows the answer, and retrieval adds time without adding quality. In that case skip the web fetch.
 
 
 ## Examples of Usage
@@ -199,4 +211,11 @@ The possibile mistakes are:
 - The quality is highly dependent on the LLM model used, so choose a model that is well-suited for your language and task. Do some tests with different models to find the best one for your needs.
 
 
+## History and my use case
+
+I wrote this project in 2025, when local LLMs could not call tools. A model running in Ollama had no way to search the web, so small open-source models often gave confident but wrong answers. The idea was to do the search myself and hand the model the right context, getting something similar to ChatGPT's web search but fully local and free.
+
+It was also an educational project: a way for me to understand, hands-on, how a retrieval-augmented generation (RAG) pipeline works, from scraping to embeddings to prompt design.
+
+Things have changed since then: agentic harnesses and tool-calling local models can now browse the web on their own. I still use this tool for one job: building Anki decks from long lists of terms, where a simple, predictable, free batch pipeline is the most practical option.
 
