@@ -1,7 +1,8 @@
 import argparse
 import json
 import os
-import re
+from pathlib import Path
+from typing import TextIO
 
 from llm.llm_manager import LLMManager
 
@@ -195,7 +196,41 @@ def answer_using_web(config_path, query, language, list_languages, use_web=True)
     }
 
 
-def handle_batch_mode(use_web=True):
+def batch_output_path(input_file: Path) -> Path:
+    """`terms.txt` -> `terms_answers.csv`, next to the input file."""
+    return input_file.with_name(f"{input_file.stem}_answers.csv")
+
+
+def sanitize_csv_field(text: str) -> str:
+    """Keep a value on a single CSV field: no separator, no line breaks."""
+    return " ".join(text.replace(CSV_SEPARATOR, " -").split())
+
+
+def drop_incomplete_last_line(path: Path) -> None:
+    """Remove a truncated last row left by a crash in the middle of a write."""
+    if not path.exists():
+        return
+    data = path.read_bytes()
+    if data and not data.endswith(b"\n"):
+        path.write_bytes(data[: data.rfind(b"\n") + 1])
+
+
+def load_answered_queries(path: Path) -> set[str]:
+    """Queries already saved in the output CSV, used to resume an interrupted batch."""
+    if not path.exists():
+        return set()
+    with path.open(encoding="utf-8") as f:
+        return {line.split(CSV_SEPARATOR, 1)[0] for line in f if CSV_SEPARATOR in line}
+
+
+def append_row(f: TextIO, query: str, answer: str) -> None:
+    """Write one row and force it to disk, so a crash cannot lose it."""
+    f.write(f"{query}{CSV_SEPARATOR}{answer}\n")
+    f.flush()
+    os.fsync(f.fileno())
+
+
+def handle_batch_mode(use_web: bool = True) -> None:
     print("[INFO] Batch mode enabled.")
     if not use_web:
         print("[INFO] Web disabled: the LLM will answer from its own knowledge.")
@@ -203,13 +238,13 @@ def handle_batch_mode(use_web=True):
     language = (
         input("[ASK] Language for research (default: global): ").strip() or "global"
     )
-    input_file = input("[ASK] Path to input .txt file: ").strip()
+    input_file = Path(input("[ASK] Path to input .txt file: ").strip())
 
-    if not os.path.exists(input_file):
+    if not input_file.is_file():
         print(f"[ERROR] File not found: {input_file}")
         exit(1)
 
-    with open(input_file, "r", encoding="utf-8") as f:
+    with input_file.open(encoding="utf-8") as f:
         questions = [line.strip() for line in f if line.strip()]
 
     expand = input("[ASK] Use query expansion? (y/n): ").strip().lower() == "y"
@@ -224,47 +259,78 @@ def handle_batch_mode(use_web=True):
     init = init_components(CONFIG_FILE, use_web)
     cfg = init["config"]
 
-    output_file = input_file.replace(".txt", "_answers.csv")
+    output_file = batch_output_path(input_file)
+    drop_incomplete_last_line(output_file)
+    answered = load_answered_queries(output_file)
 
-    # list of query with warnings
-    warning_list = []
+    # (query sent to the pipeline, sanitized query written in the CSV)
+    all_queries: list[tuple[str, str]] = []
+    for q in questions:
+        query = f"{template} {q}" if expand else q
+        all_queries.append((query, sanitize_csv_field(query)))
+    pending = [(query, key) for query, key in all_queries if key not in answered]
 
-    with open(output_file, "a", encoding="utf-8") as f:
-        for q in questions:
-            query = f"{template} {q}" if expand else q
-            print(f"[INFO] Processing: {query}")
+    if skipped := len(all_queries) - len(pending):
+        print(f"[INFO] {skipped} queries already answered in {output_file}, skipping.")
 
-            answer, status = execute_answer_using_web(
-                query=query,
-                max_pages=cfg.get("max_pages"),
-                language=language,
-                search_engine=cfg.get("search_engine"),
-                retriever=init["retrieval"],
-                llm_provider=cfg["llm_provider"],
-                model_name=cfg["final_answer_model"],
-                max_chunk=cfg.get("max_chunk"),
-                save_content_to_file=cfg.get("save_content_to_file", False),
-                llm_template=init["llm_template"],
-                temperature=init["temperature"],
-                has_thinking=init["has_thinking"],
-                use_web=use_web,
-            )
-            answer = re.sub(
-                CSV_SEPARATOR, " -", answer
-            )  # Replace CSV separator in answer to avoid issues
-            if status not in ("OK", "WEB_DISABLED"):
-                warning_list.append(f"[WARNING] {query} - Status: {status}")
-                print(f"[WARNING] {query} - Status: {status}")
-            else:
-                print(f"[OK] {query} - Answer: {answer}")
+    warning_list: list[str] = []  # saved, but answered without web content
+    error_list: list[str] = []  # not saved, will be retried on the next run
+    saved = 0
 
-            f.write(f"{query}" + CSV_SEPARATOR + f"{answer}\n")
+    try:
+        with output_file.open("a", encoding="utf-8") as f:
+            for i, (query, key) in enumerate(pending, start=1):
+                print(f"[INFO] ({i}/{len(pending)}) Processing: {query}")
+
+                try:
+                    answer, status = execute_answer_using_web(
+                        query=query,
+                        max_pages=cfg.get("max_pages"),
+                        language=language,
+                        search_engine=cfg.get("search_engine"),
+                        retriever=init["retrieval"],
+                        llm_provider=cfg["llm_provider"],
+                        model_name=cfg["final_answer_model"],
+                        max_chunk=cfg.get("max_chunk"),
+                        save_content_to_file=cfg.get("save_content_to_file", False),
+                        llm_template=init["llm_template"],
+                        temperature=init["temperature"],
+                        has_thinking=init["has_thinking"],
+                        use_web=use_web,
+                    )
+                except Exception as e:
+                    error_list.append(f"[ERROR] {query} - {e}")
+                    print(f"[ERROR] {query} - {e}")
+                    continue
+
+                answer = sanitize_csv_field(answer)
+                if not answer:
+                    error_list.append(f"[ERROR] {query} - Empty answer")
+                    print(f"[ERROR] {query} - Empty answer")
+                    continue
+
+                append_row(f, key, answer)
+                saved += 1
+
+                if status not in ("OK", "WEB_DISABLED"):
+                    warning_list.append(f"[WARNING] {query} - Status: {status}")
+                    print(f"[WARNING] {query} - Status: {status}")
+                else:
+                    print(f"[OK] {query} - Answer: {answer}")
+    except KeyboardInterrupt:
+        print("\n[WARNING] Interrupted by user.")
 
     if warning_list:
         print("\n[WARNING] Some queries had issues:")
         print("\n".join(warning_list))
 
-    print(f"[OK] Answers saved to {output_file}")
+    if error_list:
+        print("\n[ERROR] Some queries failed and were not saved:")
+        print("\n".join(error_list))
+
+    print(f"\n[OK] {saved} new answers saved to {output_file}")
+    if missing := len(pending) - saved:
+        print(f"[INFO] {missing} queries missing: run again to retry only those.")
 
 
 if __name__ == "__main__":

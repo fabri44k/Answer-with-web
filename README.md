@@ -213,7 +213,15 @@ It will ask:
 
 It will show at the end if some question has a status different than `OK`.
 
-The output will be a CSV file with the answers generated (`question; answer`), saved in the same directory as the input file.
+The output will be a CSV file with the answers generated (`question; answer`), saved in the same directory as the input file (`terms.txt` → `terms_answers.csv`).
+
+#### Crash safety and resume
+
+Each answer is written to disk as soon as it is generated, so a crash, a `Ctrl+C` or an out-of-memory error never loses the answers already produced.
+
+- If a single query fails (e.g. a scraping or LLM error), it is reported and skipped, and the batch goes on.
+- If you run the batch again on the same input file, queries already in the CSV are skipped: only the missing or failed ones are processed. Delete the CSV to start from scratch.
+- Separators and line breaks inside answers are removed, so every answer stays on one CSV row.
 
 
 ## Disclaimer
