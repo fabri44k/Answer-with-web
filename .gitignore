@@ -13,3 +13,4 @@ data_answers.csv
 
 .venv/
 .env
+.ruff_cache/
