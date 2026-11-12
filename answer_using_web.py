@@ -4,8 +4,9 @@ import os
 import re
 
 from llm.llm_manager import LLMManager
-from retrieve.st_retrieval import SentenceTransformerRetriever
-from web.web_scraper import WebScraper
+
+# WebScraper (crawl4ai) and SentenceTransformerRetriever (torch) are imported lazily,
+# so that --no-web mode starts fast and does not load the embedding model.
 
 CONFIG_FILE: str = "config.json"
 SUPPORTED_SEARCH_ENGINES: list[str] = ["ddg", "google", "ddg_custom"]
@@ -28,18 +29,13 @@ def parse_config_yaml(file):
         return 0
 
 
-def init_components(config_path):
+def init_components(config_path, use_web=True):
     config = parse_config_json(config_path)
 
-    required_keys = [
-        "llm_provider",
-        "final_answer_model",
-        "retrieval_mode",
-        "search_engine",
-        "max_pages",
-        "max_chunk",
-        "llm_template",
-    ]
+    required_keys = ["llm_provider", "final_answer_model", "llm_template"]
+    if use_web:
+        required_keys += ["retrieval_mode", "search_engine", "max_pages", "max_chunk"]
+
     for key in required_keys:
         if not config.get(key):
             print(f"[ERROR] Missing config key: {key}")
@@ -49,7 +45,7 @@ def init_components(config_path):
         print(f"[ERROR] Unsupported LLM provider: {config['llm_provider']}")
         exit(1)
 
-    if config["search_engine"] not in SUPPORTED_SEARCH_ENGINES:
+    if use_web and config["search_engine"] not in SUPPORTED_SEARCH_ENGINES:
         print(f"[ERROR] Unsupported search engine: {config['search_engine']}")
         exit(1)
 
@@ -62,15 +58,24 @@ def init_components(config_path):
         print(f"[ERROR] Model config not found: {config['final_answer_model']}")
         exit(1)
 
-    if config["retrieval_mode"] == "sentence_transformers":
-        retrieval = SentenceTransformerRetriever(config["embedding_model"])
+    retrieval = None
+    if use_web:
+        if config["retrieval_mode"] == "sentence_transformers":
+            from retrieve.st_retrieval import SentenceTransformerRetriever
+
+            retrieval = SentenceTransformerRetriever(config["embedding_model"])
+        else:
+            print(f"[ERROR] Unsupported retrieval mode: {config['retrieval_mode']}")
+            exit(1)
+        llm_template = config["llm_template"]
     else:
-        print(f"[ERROR] Unsupported retrieval mode: {config['retrieval_mode']}")
-        exit(1)
+        # Fall back to the web template (with an empty document) if no dedicated one
+        llm_template = config.get("llm_template_no_web") or config["llm_template"]
 
     return {
         "config": config,
         "retrieval": retrieval,
+        "llm_template": llm_template,
         "temperature": temperature,
         "has_thinking": has_thinking,
     }
@@ -89,7 +94,20 @@ def execute_answer_using_web(
     llm_template,
     temperature,
     has_thinking,
+    use_web=True,
 ):
+    if not use_web:
+        llm_manager = LLMManager(
+            llm_provider, model_name, temperature, llm_template, has_thinking
+        )
+        print(f"[INFO] Web disabled, generating answer with model: {model_name}...")
+        final_answer = llm_manager.answer_query(
+            {"language": language, "question": query, "document": ""}
+        )
+        return final_answer, "WEB_DISABLED"
+
+    from web.web_scraper import WebScraper
+
     status = "OK"  # or NO_WEB_CONTENT or NO_RELEVANT_CHUNKS
 
     scraper = WebScraper()
@@ -143,30 +161,32 @@ def execute_answer_using_web(
     return final_answer, status
 
 
-def answer_using_web(config_path, query, language, list_languages):
-    scraper = WebScraper()
-
+def answer_using_web(config_path, query, language, list_languages, use_web=True):
     if list_languages:
+        from web.web_scraper import WebScraper
+
+        scraper = WebScraper()
         scraper.print_ddg_supported_languages()
         scraper.print_google_supported_languages()
         return "List of supported languages printed."
 
-    init = init_components(config_path)
+    init = init_components(config_path, use_web)
     cfg = init["config"]
 
     final_answer, status = execute_answer_using_web(
         query=query,
-        max_pages=cfg["max_pages"],
+        max_pages=cfg.get("max_pages"),
         language=language,
-        search_engine=cfg["search_engine"],
+        search_engine=cfg.get("search_engine"),
         retriever=init["retrieval"],
         llm_provider=cfg["llm_provider"],
         model_name=cfg["final_answer_model"],
-        max_chunk=cfg["max_chunk"],
+        max_chunk=cfg.get("max_chunk"),
         save_content_to_file=cfg.get("save_content_to_file", False),
-        llm_template=cfg["llm_template"],
+        llm_template=init["llm_template"],
         temperature=init["temperature"],
         has_thinking=init["has_thinking"],
+        use_web=use_web,
     )
 
     return {
@@ -175,8 +195,10 @@ def answer_using_web(config_path, query, language, list_languages):
     }
 
 
-def handle_batch_mode():
+def handle_batch_mode(use_web=True):
     print("[INFO] Batch mode enabled.")
+    if not use_web:
+        print("[INFO] Web disabled: the LLM will answer from its own knowledge.")
 
     language = (
         input("[ASK] Language for research (default: global): ").strip() or "global"
@@ -199,7 +221,7 @@ def handle_batch_mode():
         else ""
     )
 
-    init = init_components(CONFIG_FILE)
+    init = init_components(CONFIG_FILE, use_web)
     cfg = init["config"]
 
     output_file = input_file.replace(".txt", "_answers.csv")
@@ -214,22 +236,23 @@ def handle_batch_mode():
 
             answer, status = execute_answer_using_web(
                 query=query,
-                max_pages=cfg["max_pages"],
+                max_pages=cfg.get("max_pages"),
                 language=language,
-                search_engine=cfg["search_engine"],
+                search_engine=cfg.get("search_engine"),
                 retriever=init["retrieval"],
                 llm_provider=cfg["llm_provider"],
                 model_name=cfg["final_answer_model"],
-                max_chunk=cfg["max_chunk"],
+                max_chunk=cfg.get("max_chunk"),
                 save_content_to_file=cfg.get("save_content_to_file", False),
-                llm_template=cfg["llm_template"],
+                llm_template=init["llm_template"],
                 temperature=init["temperature"],
                 has_thinking=init["has_thinking"],
+                use_web=use_web,
             )
             answer = re.sub(
                 CSV_SEPARATOR, " -", answer
             )  # Replace CSV separator in answer to avoid issues
-            if status != "OK":
+            if status not in ("OK", "WEB_DISABLED"):
                 warning_list.append(f"[WARNING] {query} - Status: {status}")
                 print(f"[WARNING] {query} - Status: {status}")
             else:
@@ -256,15 +279,23 @@ if __name__ == "__main__":
         "--list-language", action="store_true", help="List supported languages."
     )
     parser.add_argument("-b", "--batch", action="store_true", help="Enable batch mode.")
+    parser.add_argument(
+        "--no-web",
+        action="store_true",
+        help="Skip web fetch and retrieval: the LLM answers from its own knowledge.",
+    )
     args = parser.parse_args()
+    use_web = not args.no_web
 
     if args.batch:
-        handle_batch_mode()
+        handle_batch_mode(use_web)
     elif not args.q and not args.list_language:
         print("[ERROR] Please provide a question with -q")
         exit(1)
     else:
-        answer = answer_using_web(CONFIG_FILE, args.q, args.l, args.list_language)
+        answer = answer_using_web(
+            CONFIG_FILE, args.q, args.l, args.list_language, use_web
+        )
         if not args.list_language:
             print(f"\n[OK] Final answer with status {answer['status']}:\n")
             print(answer["final_answer"])

@@ -26,7 +26,7 @@ Today agentic tools (Claude Code, ChatGPT, local models with tool calling) can s
 - **The setup is heavy.** Torch with CUDA, Playwright, crawl4ai, an embedding model and Ollama are all required, so it is not really suited for very limited hardware.
 - **Scraping is fragile.** Search engines change and add bot protection, which can break the fetch step.
 - **Quality depends on the top results.** With a low `max_pages` the answer depends on the first pages returned by the search engine.
-- **Web content isn't always needed.** For common knowledge (e.g. definitions of everyday words) a capable model already knows the answer, and retrieval adds time without adding quality. In that case skip the web fetch.
+- **Web content isn't always needed.** For common knowledge (e.g. definitions of everyday words) a capable model already knows the answer, and retrieval adds time without adding quality. In that case use `--no-web`. Keep in mind that small local models tend to invent definitions of less common words, so with them the web fetch is still worth it.
 
 
 ## Examples of Usage
@@ -103,6 +103,8 @@ Here is the explanation of every parameter you can adjust in `config.json`:
 
 - `llm_template`: The prompt template used to instruct the LLM. It includes placeholders like `{language}`, `{question}`, and `{document}` that are filled at runtime. This guides the model to generate accurate, concise, and language-specific answers.
 
+- `llm_template_no_web` (optional): The prompt template used with `--no-web`. It supports `{language}` and `{question}`. If missing, `llm_template` is used with an empty document.
+
 - `all_llm_configs`: A list of configurations for available LLM models (only ollama is supported). Each object must include:
   - `name`: The name of the model (must match what is used in `final_answer_model`)
   - `temperature`: Sampling temperature for the model (lower is more deterministic)
@@ -161,6 +163,11 @@ The tool provides a status for each response, indicating whether the answer was 
   - `OK`: The answer was generated successfully.
   - `NO_WEB_CONTENT`: The answer was generated from the LLM without using web content.
   - `NO_RELEVANT_CHUNKS`: The retrieval did not find any relevant chunks from the web content. The answer will be based on the LLM without web content.
+  - `WEB_DISABLED`: The web fetch was skipped on purpose with `--no-web`. The answer comes from the LLM's own knowledge.
+
+### No-web mode
+
+With `--no-web` the tool skips the web fetch and the embedding retrieval: the LLM answers directly using `llm_template_no_web`. The scraper and the embedding model are not even loaded, so it starts much faster and uses less memory. It works in both single query and batch mode, and with `search_engine`, `max_pages`, `max_chunk` and `retrieval_mode` not set in the config.
 
 
 ## Usage
@@ -181,6 +188,12 @@ uv run python3 .\answer_using_web.py --list-language
 
 - `-q` is the question you want to ask. It should be in the language specified by `-l`.
 
+- `--no-web` (optional) skips the web fetch and retrieval, and the LLM answers directly.
+
+```bash
+uv run python3 answer_using_web.py --no-web -l <language> -q "<query>"
+```
+
 ## Batch Mode
 
 
@@ -189,6 +202,9 @@ Activate the batch mode:
 ```bash
 uv run python3 answer_using_web.py -b
 ```
+
+Add `--no-web` to run the whole batch without the web fetch: `uv run python3 answer_using_web.py -b --no-web`.
+
 It will ask:
 
 - Specifies the language used in the search engine and in the output response. It should match a language supported by the search engine.
