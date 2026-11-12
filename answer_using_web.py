@@ -1,12 +1,21 @@
 import argparse
 import json
 import os
+import sys
+import time
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 from dotenv import load_dotenv
 
-from llm.llm_manager import LLMManager, OllamaSettings, check_ollama_connection
+from llm.llm_manager import (
+    SUPPORTED_PROVIDERS,
+    LLMManager,
+    ProviderSettings,
+    check_connection,
+    list_models,
+    model_is_available,
+)
 
 # WebScraper (crawl4ai) and SentenceTransformerRetriever (torch) are imported lazily,
 # so that --no-web mode starts fast and does not load the embedding model.
@@ -15,8 +24,9 @@ CONFIG_FILE: str = "config.json"
 ENV_FILE: Path = Path(__file__).parent / ".env"
 SUPPORTED_SEARCH_ENGINES: list[str] = ["ddg", "google", "ddg_custom"]
 SUPPORTED_RETRIEVAL_MODES: list[str] = ["sentence_transformers"]
-SUPPORTED_LLM_PROVIDERS: list[str] = ["ollama"]
 CSV_SEPARATOR: str = ";"
+HEALTH_PROMPT: str = "Ciao, che modello sei?"
+MAX_CONSECUTIVE_ERRORS: int = 3  # stop the batch: the problem is likely not per-query
 
 
 def parse_config_json(config_path):
@@ -45,7 +55,7 @@ def init_components(config_path, use_web=True):
             print(f"[ERROR] Missing config key: {key}")
             exit(1)
 
-    if config["llm_provider"] not in SUPPORTED_LLM_PROVIDERS:
+    if config["llm_provider"] not in SUPPORTED_PROVIDERS:
         print(f"[ERROR] Unsupported LLM provider: {config['llm_provider']}")
         exit(1)
 
@@ -65,13 +75,13 @@ def init_components(config_path, use_web=True):
     # Connection settings come from the environment / .env, not from config.json.
     # Variables already set in the shell take precedence over the .env file.
     load_dotenv(ENV_FILE)
-    ollama_settings = OllamaSettings.from_env()
     try:
-        check_ollama_connection(ollama_settings, config["final_answer_model"])
-    except ConnectionError as e:
+        llm_settings = ProviderSettings.from_env(config["llm_provider"])
+        check_connection(llm_settings, config["final_answer_model"])
+    except (ValueError, ConnectionError) as e:
         print(f"[ERROR] {e}")
         exit(1)
-    print(f"[INFO] Using Ollama at {ollama_settings.base_url}")
+    print(f"[INFO] Using {llm_settings.provider} at {llm_settings.base_url}")
 
     retrieval = None
     if use_web:
@@ -93,7 +103,7 @@ def init_components(config_path, use_web=True):
         "llm_template": llm_template,
         "temperature": temperature,
         "has_thinking": has_thinking,
-        "ollama_settings": ollama_settings,
+        "llm_settings": llm_settings,
     }
 
 
@@ -111,7 +121,7 @@ def execute_answer_using_web(
     temperature,
     has_thinking,
     use_web=True,
-    ollama_settings: OllamaSettings | None = None,
+    llm_settings: ProviderSettings | None = None,
 ):
     if not use_web:
         llm_manager = LLMManager(
@@ -120,7 +130,7 @@ def execute_answer_using_web(
             temperature,
             llm_template,
             has_thinking,
-            ollama_settings,
+            llm_settings,
         )
         print(f"[INFO] Web disabled, generating answer with model: {model_name}...")
         final_answer = llm_manager.answer_query(
@@ -178,7 +188,7 @@ def execute_answer_using_web(
         temperature,
         llm_template,
         has_thinking,
-        ollama_settings,
+        llm_settings,
     )
 
     print(f"[INFO] Generating answer with model: {model_name}...")
@@ -213,7 +223,7 @@ def answer_using_web(config_path, query, language, list_languages, use_web=True)
         llm_template=init["llm_template"],
         temperature=init["temperature"],
         has_thinking=init["has_thinking"],
-        ollama_settings=init["ollama_settings"],
+        llm_settings=init["llm_settings"],
         use_web=use_web,
     )
 
@@ -303,6 +313,7 @@ def handle_batch_mode(use_web: bool = True) -> None:
     warning_list: list[str] = []  # saved, but answered without web content
     error_list: list[str] = []  # not saved, will be retried on the next run
     saved = 0
+    consecutive_errors = 0
 
     try:
         with output_file.open("a", encoding="utf-8") as f:
@@ -323,20 +334,29 @@ def handle_batch_mode(use_web: bool = True) -> None:
                         llm_template=init["llm_template"],
                         temperature=init["temperature"],
                         has_thinking=init["has_thinking"],
-                        ollama_settings=init["ollama_settings"],
+                        llm_settings=init["llm_settings"],
                         use_web=use_web,
                     )
+                    answer = sanitize_csv_field(answer)
+                    error: str | None = None if answer else "Empty answer"
                 except Exception as e:
-                    error_list.append(f"[ERROR] {query} - {e}")
-                    print(f"[ERROR] {query} - {e}")
+                    error = str(e)
+
+                if error is not None:
+                    error_list.append(f"[ERROR] {query} - {error}")
+                    print(f"[ERROR] {query} - {error}")
+                    consecutive_errors += 1
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                        # e.g. invalid API key, no credits left, server down
+                        print(
+                            f"\n[ERROR] {consecutive_errors} consecutive errors, "
+                            "stopping the batch. Fix the problem and run again "
+                            "to resume."
+                        )
+                        break
                     continue
 
-                answer = sanitize_csv_field(answer)
-                if not answer:
-                    error_list.append(f"[ERROR] {query} - Empty answer")
-                    print(f"[ERROR] {query} - Empty answer")
-                    continue
-
+                consecutive_errors = 0
                 append_row(f, key, answer)
                 saved += 1
 
@@ -361,6 +381,88 @@ def handle_batch_mode(use_web: bool = True) -> None:
         print(f"[INFO] {missing} queries missing: run again to retry only those.")
 
 
+def run_health_check(config_path: str, prompt: str) -> bool:
+    """Print the LLM configuration (never the API key), check the connection to
+    the provider and send a test prompt. Returns True if everything works."""
+    config: dict[str, Any] = parse_config_json(config_path)
+    provider: str = config.get("llm_provider", "")
+    model_name: str = config.get("final_answer_model", "")
+    model_cfg: dict[str, Any] = next(
+        (m for m in config.get("all_llm_configs", []) if m.get("name") == model_name),
+        {},
+    )
+
+    def row(label: str, value: object) -> None:
+        print(f"  {label:<16}{value}")
+
+    print("[HEALTH] Configuration")
+    row("Config file", config_path)
+    row("Env file", f"{ENV_FILE} ({'found' if ENV_FILE.exists() else 'not found'})")
+    row("Provider", provider or "<missing>")
+    row("Model", model_name or "<missing>")
+    temperature = model_cfg.get("temperature", 0.3) if model_cfg else "-"
+    row("Temperature", "provider default" if temperature is None else temperature)
+    row("Thinking", model_cfg.get("thinking_enabled", False) if model_cfg else "-")
+
+    if not model_cfg:
+        print(f"[FAIL] '{model_name}' not found in all_llm_configs")
+        return False
+
+    load_dotenv(ENV_FILE)
+    try:
+        settings = ProviderSettings.from_env(provider)
+    except ValueError as e:
+        print(f"[FAIL] {e}")
+        return False
+
+    row("Base URL", settings.base_url)
+    key_state = "set" if settings.api_key else "not set"
+    row("API key", f"{key_state} ({settings.env_prefix}_API_KEY, value hidden)")
+
+    print("\n[HEALTH] Connection")
+    start = time.perf_counter()
+    try:
+        available = list_models(settings)
+    except Exception as e:
+        print(f"[FAIL] Cannot reach {settings.base_url}: {e}")
+        return False
+    print(
+        f"[OK]   Provider reachable ({len(available)} models, "
+        f"{time.perf_counter() - start:.2f}s)"
+    )
+
+    if model_is_available(model_name, available):
+        print(f"[OK]   Model '{model_name}' available")
+    else:
+        # Not fatal: some providers do not list every model they can serve
+        print(f"[WARN] Model '{model_name}' not in the provider's model list")
+
+    print(f"\n[HEALTH] Test prompt: {prompt}")
+    start = time.perf_counter()
+    try:
+        llm = LLMManager(
+            provider,
+            model_name,
+            model_cfg.get("temperature", 0.3),
+            "{question}",  # raw prompt, no answer template
+            model_cfg.get("thinking_enabled", False),
+            settings,
+        )
+        answer = llm.answer_query({"question": prompt})
+    except Exception as e:
+        print(f"[FAIL] {e}")
+        return False
+
+    if not answer:
+        print("[FAIL] The model returned an empty answer")
+        return False
+
+    print(f"[OK]   Answer in {time.perf_counter() - start:.2f}s:\n")
+    print(f"  {answer}\n")
+    print("[HEALTH] Everything works.")
+    return True
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Answer questions using web scraping + LLM."
@@ -378,10 +480,19 @@ if __name__ == "__main__":
         action="store_true",
         help="Skip web fetch and retrieval: the LLM answers from its own knowledge.",
     )
+    parser.add_argument(
+        "--health",
+        action="store_true",
+        help="Show the LLM configuration, check the provider connection and send "
+        "a test prompt (use -q to change it).",
+    )
     args = parser.parse_args()
     use_web = not args.no_web
 
-    if args.batch:
+    if args.health:
+        healthy = run_health_check(CONFIG_FILE, args.q or HEALTH_PROMPT)
+        sys.exit(0 if healthy else 1)
+    elif args.batch:
         handle_batch_mode(use_web)
     elif not args.q and not args.list_language:
         print("[ERROR] Please provide a question with -q")

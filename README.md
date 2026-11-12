@@ -58,7 +58,7 @@ This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
 
 - Requires [uv](https://docs.astral.sh/uv/getting-started/installation/) installed. The correct Python version (3.13) is downloaded automatically by uv, so you don't need to install Python yourself.
 
-- Requires an Ollama server running, on your machine or reachable over the network (see [Ollama connection](#ollama-connection-env)).
+- Requires an LLM provider: an Ollama server (local or reachable over the network), or any OpenAI compatible API such as OpenRouter or Requesty (see [LLM provider connection](#llm-provider-connection-env)).
 
 - Install all dependencies (including torch with CUDA 12.6 support):
 
@@ -77,9 +77,9 @@ uv run crawl4ai-doctor
 ```
 Ensure that at the end appears: `[COMPLETE] ● ✅ Crawling test passed!`
 
-- Choose and download an Ollama model from https://ollama.com/search, this will be used to construct the final question.
+- Choose the model used to write the final answer: download an Ollama model from https://ollama.com/search, or pick one from your OpenAI compatible provider's model list.
 
-- Create your `.env` file from the example and set the Ollama server URL:
+- Create your `.env` file from the example and fill in the connection settings of your provider:
 
 ```bash
 cp .env.example .env
@@ -92,24 +92,43 @@ cp .env.example .env
 The configuration is split in two files:
 
 - `config.json`: the main configuration (models, retrieval, search engine, prompts).
-- `.env`: the connection settings for the Ollama server. It is not committed to git, since it may contain an API key.
+- `.env`: the connection settings (URLs and API keys) of the LLM providers. It is not committed to git, since it contains secrets.
 
-### Ollama connection (`.env`)
+### LLM provider connection (`.env`)
+
+The provider is chosen in `config.json` with `llm_provider`; its URL and key are read from `.env`.
+
+**Ollama** (`"llm_provider": "ollama"`)
 
 - `OLLAMA_BASE_URL`: URL of the Ollama server. Default: `http://127.0.0.1:11434`. If the server listens on `0.0.0.0:11434`, use `127.0.0.1` from the same machine, or the server's LAN IP from another machine (e.g. `http://192.168.1.50:11434`).
 - `OLLAMA_API_KEY` (optional): sent as `Authorization: Bearer <key>`. Needed only for a server behind an authenticated reverse proxy or for ollama.com.
 
+**OpenAI compatible** (`"llm_provider": "openai_compatible"`)
+
+Any API that implements the OpenAI Chat Completions format: OpenRouter, Requesty, but also local servers like LM Studio, llama.cpp or vLLM.
+
+- `OPENAI_COMPATIBLE_BASE_URL`: base URL of the API, including the version path.
+
+  | Provider | Base URL |
+  |---|---|
+  | OpenRouter | `https://openrouter.ai/api/v1` |
+  | Requesty | `https://router.requesty.ai/v1` |
+
+- `OPENAI_COMPATIBLE_API_KEY`: the API key of the provider. Required for OpenRouter and Requesty, can be empty for local servers.
+
+With these providers `final_answer_model` is the provider's model id, usually `vendor/model` (e.g. `google/gemini-3.5-flash-lite`). Remember to add it to `all_llm_configs` as well. Keep in mind that these providers are paid per token: check the model price before running a large batch.
+
 Variables already set in your shell take precedence over the `.env` file, e.g. `OLLAMA_BASE_URL=http://192.168.1.50:11434 uv run python3 answer_using_web.py ...`.
 
-At startup the tool checks that the server is reachable and stops immediately with a clear error if it is not, instead of failing on every query of a batch. It also warns if the selected model is not available on that server.
+At startup the tool checks that the server is reachable and stops immediately with a clear error if it is not. It also warns if the selected model is not available on that server, or if the API key is empty for an OpenAI compatible provider. Since the model list of OpenRouter and Requesty is public, an invalid API key is detected only on the first request: in batch mode the run stops after 3 consecutive errors, and you can resume it once fixed.
 
 ### config.json
 
 Here is the explanation of every parameter you can adjust in `config.json`:
 
-- `llm_provider`: The provider of the large language model (LLM) to use for generating responses. Right now only `ollama` is supported.
+- `llm_provider`: The provider of the large language model (LLM) to use for generating responses. Supported: `ollama`, `openai_compatible`.
 
-- `final_answer_model`: The specific LLM model to use from the provider. For Ollama, this must match a model you have installed locally (get their names running `ollama list`). This model must be specified in the `all_llm_configs` section at the bottom as well.
+- `final_answer_model`: The specific LLM model to use from the provider. For Ollama, this must match a model you have installed (get their names running `ollama list`). For an OpenAI compatible provider, it is the provider's model id. This model must be specified in the `all_llm_configs` section at the bottom as well.
 
 - `retrieval_mode`: The method used for semantic retrieval of relevant content. Supported: `sentence_transformers`.
 
@@ -127,9 +146,9 @@ Here is the explanation of every parameter you can adjust in `config.json`:
 
 - `llm_template_no_web` (optional): The prompt template used with `--no-web`. It supports `{language}` and `{question}`. If missing, `llm_template` is used with an empty document.
 
-- `all_llm_configs`: A list of configurations for available LLM models (only ollama is supported). Each object must include:
+- `all_llm_configs`: A list of configurations for available LLM models, of any provider. Each object must include:
   - `name`: The name of the model (must match what is used in `final_answer_model`)
-  - `temperature`: Sampling temperature for the model (lower is more deterministic)
+  - `temperature`: Sampling temperature for the model (lower is more deterministic). Set it to `null` to use the provider's default, needed for models that reject a custom temperature (e.g. some OpenAI reasoning models).
   - `thinking_enabled`: Set this to true if the model supports thinking steps (like `deepseek-r1`), which allows it to reason before answering, any thinking steps will not be included in the final answer.
 
 ### Guidelines
@@ -193,6 +212,22 @@ With `--no-web` the tool skips the web fetch and the embedding retrieval: the LL
 
 
 ## Usage
+
+### Health check
+
+Before a long batch, check that the provider is configured correctly:
+
+```bash
+uv run python3 answer_using_web.py --health
+```
+
+It prints the LLM configuration (provider, model, base URL, and whether the API key is set: the key itself is never printed), checks that the provider is reachable and the model is available, then sends a test prompt (`Ciao, che modello sei?`) and prints the answer with its response time. Use `-q` to send a different prompt:
+
+```bash
+uv run python3 answer_using_web.py --health -q "Hi, which model are you?"
+```
+
+The exit code is `0` if everything works and `1` otherwise, so it can also be used in scripts. Since the model list of OpenRouter and Requesty is public, the test prompt is the step that actually verifies your API key.
 
 ### Single Query mode
 
