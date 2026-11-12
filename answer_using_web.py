@@ -4,12 +4,15 @@ import os
 from pathlib import Path
 from typing import TextIO
 
-from llm.llm_manager import LLMManager
+from dotenv import load_dotenv
+
+from llm.llm_manager import LLMManager, OllamaSettings, check_ollama_connection
 
 # WebScraper (crawl4ai) and SentenceTransformerRetriever (torch) are imported lazily,
 # so that --no-web mode starts fast and does not load the embedding model.
 
 CONFIG_FILE: str = "config.json"
+ENV_FILE: Path = Path(__file__).parent / ".env"
 SUPPORTED_SEARCH_ENGINES: list[str] = ["ddg", "google", "ddg_custom"]
 SUPPORTED_RETRIEVAL_MODES: list[str] = ["sentence_transformers"]
 SUPPORTED_LLM_PROVIDERS: list[str] = ["ollama"]
@@ -59,6 +62,17 @@ def init_components(config_path, use_web=True):
         print(f"[ERROR] Model config not found: {config['final_answer_model']}")
         exit(1)
 
+    # Connection settings come from the environment / .env, not from config.json.
+    # Variables already set in the shell take precedence over the .env file.
+    load_dotenv(ENV_FILE)
+    ollama_settings = OllamaSettings.from_env()
+    try:
+        check_ollama_connection(ollama_settings, config["final_answer_model"])
+    except ConnectionError as e:
+        print(f"[ERROR] {e}")
+        exit(1)
+    print(f"[INFO] Using Ollama at {ollama_settings.base_url}")
+
     retrieval = None
     if use_web:
         if config["retrieval_mode"] == "sentence_transformers":
@@ -79,6 +93,7 @@ def init_components(config_path, use_web=True):
         "llm_template": llm_template,
         "temperature": temperature,
         "has_thinking": has_thinking,
+        "ollama_settings": ollama_settings,
     }
 
 
@@ -96,10 +111,16 @@ def execute_answer_using_web(
     temperature,
     has_thinking,
     use_web=True,
+    ollama_settings: OllamaSettings | None = None,
 ):
     if not use_web:
         llm_manager = LLMManager(
-            llm_provider, model_name, temperature, llm_template, has_thinking
+            llm_provider,
+            model_name,
+            temperature,
+            llm_template,
+            has_thinking,
+            ollama_settings,
         )
         print(f"[INFO] Web disabled, generating answer with model: {model_name}...")
         final_answer = llm_manager.answer_query(
@@ -152,7 +173,12 @@ def execute_answer_using_web(
     }
 
     llm_manager = LLMManager(
-        llm_provider, model_name, temperature, llm_template, has_thinking
+        llm_provider,
+        model_name,
+        temperature,
+        llm_template,
+        has_thinking,
+        ollama_settings,
     )
 
     print(f"[INFO] Generating answer with model: {model_name}...")
@@ -187,6 +213,7 @@ def answer_using_web(config_path, query, language, list_languages, use_web=True)
         llm_template=init["llm_template"],
         temperature=init["temperature"],
         has_thinking=init["has_thinking"],
+        ollama_settings=init["ollama_settings"],
         use_web=use_web,
     )
 
@@ -296,6 +323,7 @@ def handle_batch_mode(use_web: bool = True) -> None:
                         llm_template=init["llm_template"],
                         temperature=init["temperature"],
                         has_thinking=init["has_thinking"],
+                        ollama_settings=init["ollama_settings"],
                         use_web=use_web,
                     )
                 except Exception as e:

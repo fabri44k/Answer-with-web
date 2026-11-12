@@ -58,7 +58,7 @@ This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
 
 - Requires [uv](https://docs.astral.sh/uv/getting-started/installation/) installed. The correct Python version (3.13) is downloaded automatically by uv, so you don't need to install Python yourself.
 
-- Requires Ollama installed and running on your machine.
+- Requires an Ollama server running, on your machine or reachable over the network (see [Ollama connection](#ollama-connection-env)).
 
 - Install all dependencies (including torch with CUDA 12.6 support):
 
@@ -79,9 +79,31 @@ Ensure that at the end appears: `[COMPLETE] ● ✅ Crawling test passed!`
 
 - Choose and download an Ollama model from https://ollama.com/search, this will be used to construct the final question.
 
+- Create your `.env` file from the example and set the Ollama server URL:
+
+```bash
+cp .env.example .env
+```
+
 - The next step is to configure the `config.json` file, see the configuration section below for details.
 
 ## Configuration
+
+The configuration is split in two files:
+
+- `config.json`: the main configuration (models, retrieval, search engine, prompts).
+- `.env`: the connection settings for the Ollama server. It is not committed to git, since it may contain an API key.
+
+### Ollama connection (`.env`)
+
+- `OLLAMA_BASE_URL`: URL of the Ollama server. Default: `http://127.0.0.1:11434`. If the server listens on `0.0.0.0:11434`, use `127.0.0.1` from the same machine, or the server's LAN IP from another machine (e.g. `http://192.168.1.50:11434`).
+- `OLLAMA_API_KEY` (optional): sent as `Authorization: Bearer <key>`. Needed only for a server behind an authenticated reverse proxy or for ollama.com.
+
+Variables already set in your shell take precedence over the `.env` file, e.g. `OLLAMA_BASE_URL=http://192.168.1.50:11434 uv run python3 answer_using_web.py ...`.
+
+At startup the tool checks that the server is reachable and stops immediately with a clear error if it is not, instead of failing on every query of a batch. It also warns if the selected model is not available on that server.
+
+### config.json
 
 Here is the explanation of every parameter you can adjust in `config.json`:
 

@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.13.*"
 
 [[package]]
@@ -131,6 +131,7 @@ dependencies = [
     { name = "langchain" },
     { name = "langchain-ollama" },
     { name = "langchain-text-splitters" },
+    { name = "python-dotenv" },
     { name = "sentence-transformers" },
     { name = "stealth-requests" },
     { name = "strip-markdown" },
@@ -147,6 +148,7 @@ requires-dist = [
     { name = "langchain", specifier = ">=1.0" },
     { name = "langchain-ollama", specifier = ">=0.1.0" },
     { name = "langchain-text-splitters", specifier = ">=0.0.1" },
+    { name = "python-dotenv", specifier = ">=1.0" },
     { name = "sentence-transformers", specifier = ">=2.0.0" },
     { name = "stealth-requests", specifier = ">=2.0.6" },
     { name = "strip-markdown", specifier = ">=0.1.4" },

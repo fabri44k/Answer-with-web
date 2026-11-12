@@ -12,3 +12,4 @@ data.txt
 data_answers.csv
 
 .venv/
+.env
